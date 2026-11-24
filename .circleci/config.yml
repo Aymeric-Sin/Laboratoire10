@@ -1,0 +1,70 @@
+# .circleci/config.yml — SEG2505 Labo semaine 10
+# Pipeline CI/CD pour une application Android (Java, Gradle Kotlin DSL)
+#   1. build-and-test : checkout, dépendances, tests unitaires, lint
+#   2. assemble-apk   : construit l'APK et le publie comme artefact (branche main seulement)
+
+version: 2.1
+
+executors:
+  android:
+    docker:
+      - image: cimg/android:2026.03.1
+    environment:
+      # Limite la mémoire de Gradle pour tenir dans la machine "medium" gratuite
+      GRADLE_OPTS: "-Xmx3g -Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2"
+
+commands:
+  setup-gradle:
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - gradle-v1-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}-{{ checksum "app/build.gradle.kts" }}
+            - gradle-v1-
+      - run:
+          name: Rendre gradlew exécutable
+          command: chmod +x ./gradlew
+
+jobs:
+  build-and-test:
+    executor: android
+    steps:
+      - setup-gradle
+      - run:
+          name: Tests unitaires (JUnit)
+          command: ./gradlew testDebugUnitTest
+      - run:
+          name: Analyse statique (Android Lint)
+          command: ./gradlew lintDebug
+      - save_cache:
+          key: gradle-v1-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}-{{ checksum "app/build.gradle.kts" }}
+          paths:
+            - ~/.gradle/caches
+            - ~/.gradle/wrapper
+      - store_test_results:
+          path: app/build/test-results
+      - store_artifacts:
+          path: app/build/reports
+          destination: rapports
+
+  assemble-apk:
+    executor: android
+    steps:
+      - setup-gradle
+      - run:
+          name: Construction de l'APK (debug)
+          command: ./gradlew assembleDebug
+      - store_artifacts:
+          path: app/build/outputs/apk/debug
+          destination: apk
+
+workflows:
+  ci-cd:
+    jobs:
+      - build-and-test
+      - assemble-apk:
+          requires:
+            - build-and-test
+          filters:
+            branches:
+              only: main
